@@ -1,0 +1,21 @@
+bundle:
+  name: streaming_query_monitor
+
+# Dashboard-only deployment: include just the dashboard resource (not the
+# streaming job) and skip the wheel artifact, which is only needed to ship the
+# listener to a cluster.
+include:
+  - resources/dashboard.yml
+
+variables:
+  warehouse_id:
+    description: "SQL warehouse id backing the dashboard datasets"
+    default: "<REPLACE-ME>"
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      # Literal host: workspace.host does not support variable interpolation.
+      host: https://fevm-serverless-stable-0dg4hj.cloud.databricks.com

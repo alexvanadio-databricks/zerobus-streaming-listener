@@ -1,0 +1,319 @@
+{
+  "datasets": [
+    {
+      "name": "ds_progress",
+      "displayName": "Progress events",
+      "queryLines": [
+        "SELECT ",
+        "  query_name, ",
+        "  run_id, ",
+        "  batch_id, ",
+        "  to_timestamp(event_timestamp) AS event_time, ",
+        "  num_input_rows, ",
+        "  input_rows_per_second, ",
+        "  processed_rows_per_second, ",
+        "  batch_duration_ms, ",
+        "  CAST(observed_metrics:iot_metrics:row_count AS BIGINT) AS obs_row_count, ",
+        "  CAST(observed_metrics:iot_metrics:null_temp_count AS BIGINT) AS obs_null_temp, ",
+        "  CAST(observed_metrics:iot_metrics:null_humidity_count AS BIGINT) AS obs_null_humidity, ",
+        "  CAST(observed_metrics:iot_metrics:out_of_range_count AS BIGINT) AS obs_out_of_range, ",
+        "  array_size(CAST(observed_metrics:iot_metrics:devices_captured AS ARRAY<STRING>)) AS obs_distinct_devices, ",
+        "  CAST(observed_metrics:iot_metrics:avg_temp_c AS DOUBLE) AS obs_avg_temp_c, ",
+        "  CAST(observed_metrics:iot_metrics:max_temp_c AS DOUBLE) AS obs_max_temp_c, ",
+        "  CAST(observed_metrics:iot_metrics:avg_humidity_pct AS DOUBLE) AS obs_avg_humidity ",
+        "FROM streaming_monitor.query_metrics ",
+        "WHERE event_type = 'progress'"
+      ]
+    },
+    {
+      "name": "ds_lifecycle",
+      "displayName": "Lifecycle events",
+      "queryLines": [
+        "SELECT ",
+        "  event_type, ",
+        "  query_name, ",
+        "  query_id, ",
+        "  run_id, ",
+        "  to_timestamp(event_timestamp) AS event_time, ",
+        "  error_class, ",
+        "  error_message ",
+        "FROM streaming_monitor.query_metrics ",
+        "WHERE event_type IN ('started', 'terminated') ",
+        "ORDER BY event_time"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "page_overview",
+      "displayName": "Pipeline Health",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layout": [
+        {
+          "widget": {
+            "name": "title",
+            "multilineTextboxSpec": {
+              "lines": ["## Streaming Query Health (Zerobus)"]
+            }
+          },
+          "position": {"x": 0, "y": 0, "width": 6, "height": 1}
+        },
+        {
+          "widget": {
+            "name": "subtitle",
+            "multilineTextboxSpec": {
+              "lines": ["Spark StreamingQueryListener metrics ingested to Delta via Databricks Zerobus. Variant columns hold sink/source/duration and custom df.observe metrics."]
+            }
+          },
+          "position": {"x": 0, "y": 1, "width": 6, "height": 1}
+        },
+        {
+          "widget": {
+            "name": "kpi-active-queries",
+            "queries": [{
+              "name": "main_query",
+              "query": {
+                "datasetName": "ds_progress",
+                "fields": [{"name": "countdistinct(run_id)", "expression": "COUNT(DISTINCT `run_id`)"}],
+                "disaggregated": false
+              }
+            }],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {"fieldName": "countdistinct(run_id)", "displayName": "Active query runs"}
+              },
+              "frame": {"showTitle": true, "title": "Active query runs"}
+            }
+          },
+          "position": {"x": 0, "y": 2, "width": 2, "height": 3}
+        },
+        {
+          "widget": {
+            "name": "kpi-total-rows",
+            "queries": [{
+              "name": "main_query",
+              "query": {
+                "datasetName": "ds_progress",
+                "fields": [{"name": "sum(num_input_rows)", "expression": "SUM(`num_input_rows`)"}],
+                "disaggregated": false
+              }
+            }],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {"fieldName": "sum(num_input_rows)", "displayName": "Total input rows"}
+              },
+              "frame": {"showTitle": true, "title": "Total input rows"}
+            }
+          },
+          "position": {"x": 2, "y": 2, "width": 2, "height": 3}
+        },
+        {
+          "widget": {
+            "name": "kpi-out-of-range",
+            "queries": [{
+              "name": "main_query",
+              "query": {
+                "datasetName": "ds_progress",
+                "fields": [{"name": "sum(obs_out_of_range)", "expression": "SUM(`obs_out_of_range`)"}],
+                "disaggregated": false
+              }
+            }],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {"fieldName": "sum(obs_out_of_range)", "displayName": "Out-of-range readings"}
+              },
+              "frame": {"showTitle": true, "title": "Out-of-range readings (DQ)"}
+            }
+          },
+          "position": {"x": 4, "y": 2, "width": 2, "height": 3}
+        },
+        {
+          "widget": {
+            "name": "section-throughput",
+            "multilineTextboxSpec": {"lines": ["### Throughput"]}
+          },
+          "position": {"x": 0, "y": 5, "width": 6, "height": 1}
+        },
+        {
+          "widget": {
+            "name": "chart-input-rate",
+            "queries": [{
+              "name": "main_query",
+              "query": {
+                "datasetName": "ds_progress",
+                "fields": [
+                  {"name": "event_time", "expression": "`event_time`"},
+                  {"name": "query_name", "expression": "`query_name`"},
+                  {"name": "avg(input_rows_per_second)", "expression": "AVG(`input_rows_per_second`)"}
+                ],
+                "disaggregated": false
+              }
+            }],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {"fieldName": "event_time", "scale": {"type": "temporal"}, "displayName": "Time"},
+                "y": {"fieldName": "avg(input_rows_per_second)", "scale": {"type": "quantitative"}, "displayName": "Input rows/sec"},
+                "color": {"fieldName": "query_name", "scale": {"type": "categorical"}, "displayName": "Query"}
+              },
+              "frame": {"showTitle": true, "title": "Input throughput by query"}
+            }
+          },
+          "position": {"x": 0, "y": 6, "width": 3, "height": 6}
+        },
+        {
+          "widget": {
+            "name": "chart-batch-duration",
+            "queries": [{
+              "name": "main_query",
+              "query": {
+                "datasetName": "ds_progress",
+                "fields": [
+                  {"name": "event_time", "expression": "`event_time`"},
+                  {"name": "query_name", "expression": "`query_name`"},
+                  {"name": "avg(batch_duration_ms)", "expression": "AVG(`batch_duration_ms`)"}
+                ],
+                "disaggregated": false
+              }
+            }],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {"fieldName": "event_time", "scale": {"type": "temporal"}, "displayName": "Time"},
+                "y": {"fieldName": "avg(batch_duration_ms)", "scale": {"type": "quantitative"}, "displayName": "Batch duration (ms)"},
+                "color": {"fieldName": "query_name", "scale": {"type": "categorical"}, "displayName": "Query"}
+              },
+              "frame": {"showTitle": true, "title": "Batch duration by query"}
+            }
+          },
+          "position": {"x": 3, "y": 6, "width": 3, "height": 6}
+        },
+        {
+          "widget": {
+            "name": "section-quality",
+            "multilineTextboxSpec": {"lines": ["### Data Quality (custom observation)"]}
+          },
+          "position": {"x": 0, "y": 12, "width": 6, "height": 1}
+        },
+        {
+          "widget": {
+            "name": "chart-avg-temp",
+            "queries": [{
+              "name": "main_query",
+              "query": {
+                "datasetName": "ds_progress",
+                "fields": [
+                  {"name": "event_time", "expression": "`event_time`"},
+                  {"name": "query_name", "expression": "`query_name`"},
+                  {"name": "avg(obs_avg_temp_c)", "expression": "AVG(`obs_avg_temp_c`)"}
+                ],
+                "disaggregated": false
+              }
+            }],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {"fieldName": "event_time", "scale": {"type": "temporal"}, "displayName": "Time"},
+                "y": {"fieldName": "avg(obs_avg_temp_c)", "scale": {"type": "quantitative"}, "displayName": "Avg temperature (C)"},
+                "color": {"fieldName": "query_name", "scale": {"type": "categorical"}, "displayName": "Query"}
+              },
+              "frame": {"showTitle": true, "title": "Observed avg temperature"}
+            }
+          },
+          "position": {"x": 0, "y": 13, "width": 3, "height": 6}
+        },
+        {
+          "widget": {
+            "name": "chart-null-counts",
+            "queries": [{
+              "name": "main_query",
+              "query": {
+                "datasetName": "ds_progress",
+                "fields": [
+                  {"name": "query_name", "expression": "`query_name`"},
+                  {"name": "sum(obs_null_temp)", "expression": "SUM(`obs_null_temp`)"},
+                  {"name": "sum(obs_null_humidity)", "expression": "SUM(`obs_null_humidity`)"}
+                ],
+                "disaggregated": false
+              }
+            }],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {"fieldName": "query_name", "scale": {"type": "categorical"}, "displayName": "Query"},
+                "y": {
+                  "scale": {"type": "quantitative"},
+                  "fields": [
+                    {"fieldName": "sum(obs_null_temp)", "displayName": "Null temp"},
+                    {"fieldName": "sum(obs_null_humidity)", "displayName": "Null humidity"}
+                  ]
+                },
+                "label": {"show": true}
+              },
+              "frame": {"showTitle": true, "title": "Null readings by query"},
+              "mark": {"layout": "group"}
+            }
+          },
+          "position": {"x": 3, "y": 13, "width": 3, "height": 6}
+        },
+        {
+          "widget": {
+            "name": "section-lifecycle",
+            "multilineTextboxSpec": {"lines": ["### Query Lifecycle"]}
+          },
+          "position": {"x": 0, "y": 19, "width": 6, "height": 1}
+        },
+        {
+          "widget": {
+            "name": "table-lifecycle",
+            "queries": [{
+              "name": "main_query",
+              "query": {
+                "datasetName": "ds_lifecycle",
+                "fields": [
+                  {"name": "event_time", "expression": "`event_time`"},
+                  {"name": "event_type", "expression": "`event_type`"},
+                  {"name": "query_name", "expression": "`query_name`"},
+                  {"name": "run_id", "expression": "`run_id`"},
+                  {"name": "error_class", "expression": "`error_class`"},
+                  {"name": "error_message", "expression": "`error_message`"}
+                ],
+                "disaggregated": true
+              }
+            }],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {"fieldName": "event_time", "displayName": "Time"},
+                  {"fieldName": "event_type", "displayName": "Event"},
+                  {"fieldName": "query_name", "displayName": "Query"},
+                  {"fieldName": "run_id", "displayName": "Run id"},
+                  {"fieldName": "error_class", "displayName": "Error class"},
+                  {"fieldName": "error_message", "displayName": "Error message"}
+                ]
+              },
+              "frame": {"showTitle": true, "title": "Started / terminated events"}
+            }
+          },
+          "position": {"x": 0, "y": 20, "width": 6, "height": 6}
+        }
+      ]
+    }
+  ],
+  "uiSettings": {
+    "theme": {"widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"},
+    "applyModeEnabled": false
+  }
+}

@@ -1,0 +1,25 @@
+# Shared configuration for the IoT streaming-query-listener example.
+
+# --- Unity Catalog location ---
+catalog: main 
+schema: streaming_monitor
+volume: raw_landing
+volume_path: /Volumes/main/streaming_monitor/raw_landing
+
+# Table the ZerobusStreamingQueryListener writes query metrics to.
+metrics_table: main.streaming_monitor.query_metrics
+
+# Two device fleets -> two parquet landing dirs -> two independent streams.
+fleets:
+  - fleet_a
+  - fleet_b
+
+# --- Zerobus connection for the streaming-query listener ---
+# The client secret is NOT stored here. It is read at runtime from a Databricks
+# secret scope (dbutils.secrets.get(secret_scope, client_secret_key)).
+zerobus:
+  server_endpoint: <workspace id>.zerobus.us-east-1.cloud.databricks.com
+  workspace_url: https://<workspace url>
+  client_id: <client id> 
+  secret_scope: zerobus
+  client_secret_key: client_secret

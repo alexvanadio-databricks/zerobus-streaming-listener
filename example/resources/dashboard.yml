@@ -1,0 +1,8 @@
+resources:
+  dashboards:
+    streaming_health_dashboard:
+      display_name: "Streaming Query Health (Zerobus)"
+      file_path: ../dashboard/streaming_health.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+      # Redeploy when the local dashboard file changes.
+      embed_credentials: false
