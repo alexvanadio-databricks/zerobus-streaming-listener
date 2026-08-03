@@ -16,6 +16,3 @@ targets:
   dev:
     mode: development
     default: true
-    workspace:
-      # Literal host: workspace.host does not support variable interpolation.
-      host: https://fevm-serverless-stable-0dg4hj.cloud.databricks.com
