@@ -72,7 +72,12 @@ class ZerobusSink:
         return self._stream
 
     def ingest(self, record: dict[str, Any]) -> None:
-        """Queue a single record for ingestion (non-blocking on the server)."""
+        """Queue a record for ingestion (async, non-blocking).
+
+        Never blocks per record: this runs on the single-threaded listener bus,
+        so waiting here would stall later events. Durability comes from flush()
+        in close().
+        """
         stream = self._ensure_stream()
         stream.ingest_record_offset(record)
 
@@ -82,12 +87,18 @@ class ZerobusSink:
             self._stream.flush()
 
     def close(self) -> None:
-        """Flush and close the stream. Safe to call more than once."""
+        """Flush and close the stream. Idempotent; never raises.
+
+        A flush failure is logged, not raised: closing the metrics sink must not
+        take down the caller.
+        """
         with self._lock:
             if self._stream is None:
                 return
             try:
                 self._stream.flush()
+            except Exception:  # noqa: BLE001 - closing the metrics sink must not raise
+                logger.exception("Zerobus flush failed on close; some records may be lost")
             finally:
                 self._stream.close()
                 self._stream = None

@@ -15,6 +15,7 @@ import json
 import logging
 import math
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -99,14 +100,19 @@ class ZerobusStreamingQueryListener(StreamingQueryListener):
         # look them up when the query terminates.
         self._runs: dict[str, _RunState] = {}
         self._runs_lock = threading.Lock()
+        # Delivered terminated-event count; the driver waits on it before closing,
+        # since the listener bus is async (see wait_until_drained).
+        self._terminated_count = 0
 
     # --- lifecycle events -------------------------------------------------
 
     def onQueryStarted(self, event: QueryStartedEvent) -> None:
         with self._runs_lock:
-            self._runs[str(event.runId)] = _RunState(name=event.name, last_timestamp=event.timestamp)
+            self._runs[str(event.runId)] = _RunState(
+                name=event.name, last_timestamp=event.timestamp
+            )
 
-        self._safe_ingest(
+        self._ingest(
             {
                 "event_type": "started",
                 "query_id": str(event.id),
@@ -125,7 +131,7 @@ class ZerobusStreamingQueryListener(StreamingQueryListener):
             state.name = p.name
             state.last_timestamp = p.timestamp
 
-        self._safe_ingest(
+        self._ingest(
             {
                 "event_type": "progress",
                 "query_id": str(p.id),
@@ -151,8 +157,9 @@ class ZerobusStreamingQueryListener(StreamingQueryListener):
         # The event has no name/timestamp; recover them from the tracked run.
         with self._runs_lock:
             state = self._runs.pop(str(event.runId), None)
+            self._terminated_count += 1
 
-        self._safe_ingest(
+        self._ingest(
             {
                 "event_type": "terminated",
                 "query_id": str(event.id),
@@ -166,14 +173,44 @@ class ZerobusStreamingQueryListener(StreamingQueryListener):
 
     # --- helpers ----------------------------------------------------------
 
-    def _safe_ingest(self, record: dict[str, Any]) -> None:
-        """Never let a listener failure break the streaming query."""
+    def _ingest(self, record: dict[str, Any]) -> None:
+        """Ingest one event; log and drop on failure, never raise.
+
+        The listener bus already swallows NonFatal callback exceptions, so a raise
+        here wouldn't crash the query -- but we catch anyway to log the specific
+        failing record rather than a generic bus error.
+        """
         try:
             self._sink.ingest(record)
-        except Exception as e:  # noqa: BLE001 - listener must not raise
-            print(str(e))
-            logger.exception("Failed to ingest streaming query event to Zerobus")
+        except Exception:  # noqa: BLE001 - listener must not raise
+            logger.exception(
+                "Zerobus ingest failed for %s event (query=%s, run=%s); record dropped",
+                record.get("event_type"),
+                record.get("query_name"),
+                record.get("run_id"),
+            )
+
+    def wait_until_drained(self, expected_queries: int, timeout: float = 60.0) -> bool:
+        """Block until every query's terminated event has been delivered.
+
+        Listener callbacks are async, so after awaitTermination() returns on the
+        driver the last events may still be in flight; closing now would drop
+        them. Events are ordered, so once all terminated events arrive, all
+        earlier progress events have too. Returns True if drained within timeout.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with self._runs_lock:
+                if self._terminated_count >= expected_queries:
+                    return True
+            time.sleep(0.2)
+        logger.warning(
+            "Timed out waiting for listener bus to drain: %d/%d terminated events",
+            self._terminated_count,
+            expected_queries,
+        )
+        return False
 
     def close(self) -> None:
-        """Flush and close the underlying sink."""
+        """Flush and close the underlying sink. Never raises."""
         self._sink.close()
