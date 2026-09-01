@@ -228,7 +228,16 @@ streams
 
 # COMMAND ----------
 
-spark.streams.awaitAnyTermination()
+# Wait for every query (availableNow), not awaitAnyTermination() which returns
+# after just the first one ends.
+queries = [q for fleet_queries in streams for q in fleet_queries]
+for q in queries:
+    q.awaitTermination()
+
+# Listener callbacks are async: let all events drain before closing, or the
+# final progress events are lost.
+listener.wait_until_drained(expected_queries=len(queries))
+listener.close()
 
 
 # COMMAND ----------
