@@ -1,0 +1,67 @@
+bundle:
+  name: streaming_query_monitor
+
+# Deploy everything: the streaming job (setup -> generate -> pipeline) and the
+# AI/BI dashboard over the metrics table.
+include:
+  - resources/*.yml
+
+# Build the reusable listener wheel locally and ship it to the job cluster as a
+# library. This is what lets the notebooks just `import streaming_listener`
+# instead of hacking sys.path. The wheel can still be built in isolation with
+# `uv build --wheel` — the bundle just automates it on deploy.
+artifacts:
+  streaming_listener_wheel:
+    type: whl
+    build: uv build --wheel
+    path: .
+
+variables:
+  catalog:
+    description: "UC catalog for the schema, volume, and metrics table"
+    default: classic_stable_qkee68_catalog
+  schema:
+    description: "UC schema"
+    default: streaming_monitor
+  volume:
+    description: "UC volume that raw telemetry parquet lands in"
+    default: raw_landing
+  fleets:
+    description: "Comma-separated device fleet names -> one stream each"
+    default: fleet_a,fleet_b
+  num_batches:
+    description: "Batches of telemetry to generate before the pipeline drains them (bounded run)"
+    default: "3"
+  node_type_id:
+    description: "Node type for the single-node job cluster"
+    default: m5d.xlarge
+
+  # --- Zerobus connection (the client SECRET is never here; it lives in a
+  # secret scope and is read at runtime via dbutils.secrets.get) ---
+  zerobus_server_endpoint:
+    description: "Zerobus gRPC endpoint, no scheme: <workspace-id>.zerobus.<region>.cloud.databricks.com"
+    default: "<workspace-id>.zerobus.<region>.cloud.databricks.com"
+  zerobus_workspace_url:
+    description: "Workspace URL, e.g. https://<deployment>.cloud.databricks.com"
+    default: "https://<deployment>.cloud.databricks.com"
+  zerobus_client_id:
+    description: "Service-principal OAuth client id"
+    default: "<service-principal-client-id>"
+  zerobus_secret_scope:
+    description: "Secret scope holding the SP client secret"
+    default: zerobus
+  zerobus_client_secret_key:
+    description: "Key within the secret scope for the SP client secret"
+    default: client_secret
+
+targets:
+  # Concrete working config for the fevm-classic-stable-qkee68 workspace. These
+  # are non-secret identifiers (the OAuth secret stays in the `zerobus` scope);
+  # override them for any other workspace with `--var` or your own target.
+  dev:
+    mode: development
+    default: true
+    variables:
+      zerobus_server_endpoint: 7474651352199631.zerobus.us-east-1.cloud.databricks.com
+      zerobus_workspace_url: https://fevm-classic-stable-qkee68.cloud.databricks.com
+      zerobus_client_id: 26d33785-467e-46b9-9727-3871204c0286

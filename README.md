@@ -71,12 +71,36 @@ fields as JSON with `RecordType.JSON` (no proto-compile step).
 
 | Path | What it is |
 |------|-----------|
-| `src/streaming_listener/` | **Core reusable pattern** — the listener, Zerobus sink, config, and metrics-table schema. Packaged as a wheel. |
-| `example/` | Self-contained IoT example + Databricks Asset Bundle (pipeline notebooks, config, dashboard, and `databricks.yml`). See [`example/README.md`](example/README.md). |
+| `src/streaming_listener/` | **Core reusable pattern** — the listener, Zerobus sink, config, and metrics-table schema. Packaged as a wheel (build standalone with `uv build --wheel`). |
+| `notebooks/` | Runnable IoT example: `setup_resources.py`, `generate_data.py`, `pipeline.py`. |
+| `dashboard/` | AI/BI (Lakeview) dashboard over the metrics table. |
+| `resources/` | Bundle resources: the streaming job (`streaming.job.yml`) and the dashboard (`dashboard.yml`). |
+| `databricks.yml` | Databricks Asset Bundle: variables, the listener wheel artifact, and the dev target. |
 
-## Example
+## Run the example (Databricks Asset Bundle)
 
-A complete, runnable example lives under [`example/`](example/README.md)
+The whole example — build the wheel, deploy the 3-task job plus the dashboard, and run it — is one bundle:
+
+```bash
+# 1. Put the service-principal OAuth secret in a scope (once):
+databricks secrets create-scope zerobus
+databricks secrets put-secret zerobus client_secret
+
+# 2. Point the bundle at your workspace: edit the databricks.yml variables
+#    (catalog, warehouse_id, zerobus_*) or override them with --var, then:
+databricks bundle deploy -t dev
+databricks bundle run streaming_query_monitor -t dev
+```
+
+The job runs `setup → generate → pipeline` on a single-node **classic** cluster
+(the Zerobus SDK can't install on serverless). `generate` lands `num_batches`
+batches of fake telemetry; `pipeline` registers the listener and drains them,
+and the listener ships query metrics to `<catalog>.<schema>.query_metrics` via
+Zerobus. The dashboard reads that table.
+
+Config flows bundle **variables** → job **parameters** → notebook **widgets**,
+so there's nothing to edit inside the notebooks. The client secret is never a
+parameter; it's read at runtime from the `zerobus` secret scope.
 
 ## Tooling
 
