@@ -17,20 +17,8 @@
 # MAGIC registered `ZerobusStreamingQueryListener`.
 
 # COMMAND ----------
-# MAGIC %pip install databricks-zerobus-ingest-sdk>=0.1.0 pyyaml
-
-# COMMAND ----------
 
 from __future__ import annotations
-
-import os
-import sys
-
-import yaml
-
-# Make the core package (streaming_listener) importable regardless of how the
-# job launches this file.
-sys.path.insert(0, os.path.join(os.getcwd(), "..", "src"))
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
@@ -43,7 +31,8 @@ from pyspark.sql.types import (
     TimestampType,
 )
 
-# The core reusable pattern:
+# The core reusable pattern, installed on the cluster as a wheel library by the
+# bundle (no sys.path hacking needed).
 from streaming_listener import ZerobusConfig, ZerobusStreamingQueryListener
 
 # COMMAND ----------
@@ -51,25 +40,38 @@ from streaming_listener import ZerobusConfig, ZerobusStreamingQueryListener
 # MAGIC %md
 # MAGIC ## Load configuration
 # MAGIC
-# MAGIC Everything is read from `example_config.yaml`. The Zerobus client secret is
-# MAGIC never stored in the file — it is pulled at runtime from the secret scope named
-# MAGIC in the YAML.
+# MAGIC Config comes from job parameters (surfaced as notebook widgets), fed by the
+# MAGIC bundle's variables. The Zerobus client secret is never a parameter — it is
+# MAGIC pulled at runtime from the secret scope named in `zerobus_secret_scope`.
 
 # COMMAND ----------
 
-with open(os.path.join(os.getcwd(), "example_config.yaml")) as f:
-    CFG = yaml.safe_load(f)
+# Config arrives as job parameters (widgets); defaults allow interactive runs.
+dbutils.widgets.text("catalog", "classic_stable_qkee68_catalog")  # noqa: F821
+dbutils.widgets.text("schema", "streaming_monitor")  # noqa: F821
+dbutils.widgets.text("volume", "raw_landing")  # noqa: F821
+dbutils.widgets.text("fleets", "fleet_a,fleet_b")  # noqa: F821
+dbutils.widgets.text("zerobus_server_endpoint", "")  # noqa: F821
+dbutils.widgets.text("zerobus_workspace_url", "")  # noqa: F821
+dbutils.widgets.text("zerobus_client_id", "")  # noqa: F821
+dbutils.widgets.text("zerobus_secret_scope", "zerobus")  # noqa: F821
+dbutils.widgets.text("zerobus_client_secret_key", "client_secret")  # noqa: F821
 
-CATALOG = CFG["catalog"]
-SCHEMA = CFG["schema"]
-VOLUME_PATH = CFG["volume_path"]
-FLEETS = CFG["fleets"]
-METRICS_TABLE = CFG["metrics_table"]
+CATALOG = dbutils.widgets.get("catalog")  # noqa: F821
+SCHEMA = dbutils.widgets.get("schema")  # noqa: F821
+VOLUME = dbutils.widgets.get("volume")  # noqa: F821
+FLEETS = [f.strip() for f in dbutils.widgets.get("fleets").split(",") if f.strip()]  # noqa: F821
+VOLUME_PATH = f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}"
+METRICS_TABLE = f"{CATALOG}.{SCHEMA}.query_metrics"
 
-ZB = CFG["zerobus"]
-CLIENT_ID = ZB["client_id"]
-# The secret lives in a Databricks secret scope, not in the YAML.
-CLIENT_SECRET = dbutils.secrets.get(ZB["secret_scope"], ZB["client_secret_key"])  # noqa: F821
+SERVER_ENDPOINT = dbutils.widgets.get("zerobus_server_endpoint")  # noqa: F821
+WORKSPACE_URL = dbutils.widgets.get("zerobus_workspace_url")  # noqa: F821
+CLIENT_ID = dbutils.widgets.get("zerobus_client_id")  # noqa: F821
+# The secret lives in a Databricks secret scope, never in a parameter.
+CLIENT_SECRET = dbutils.secrets.get(  # noqa: F821
+    dbutils.widgets.get("zerobus_secret_scope"),  # noqa: F821
+    dbutils.widgets.get("zerobus_client_secret_key"),  # noqa: F821
+)
 
 
 def landing_path(fleet: str) -> str:
@@ -86,6 +88,7 @@ def agg_table(fleet: str) -> str:
 
 def checkpoint_path(name: str) -> str:
     return f"{VOLUME_PATH}/_checkpoints/{name}"
+
 
 # COMMAND ----------
 
@@ -142,18 +145,14 @@ def with_iot_observation(df: DataFrame, name: str) -> DataFrame:
         F.round(F.avg("battery_pct"), 2).alias("avg_battery_pct"),
     )
 
+
 # COMMAND ----------
 
 
 def start_fleet(spark: SparkSession, fleet: str):
     """Start the bronze + aggregation streams for one fleet; return the queries."""
     # --- bronze: raw parquet -> delta ---
-    bronze_stream = (
-        spark.readStream
-        .schema(RAW_SCHEMA)
-        .format("parquet")
-        .load(landing_path(fleet))
-    )
+    bronze_stream = spark.readStream.schema(RAW_SCHEMA).format("parquet").load(landing_path(fleet))
 
     bronze_query = (
         bronze_stream.writeStream.queryName(f"bronze_{fleet}")
@@ -172,8 +171,7 @@ def start_fleet(spark: SparkSession, fleet: str):
     df_observation = with_iot_observation(df_stream, name="iot_metrics")
 
     agg = (
-        df_observation
-        .withWatermark("reading_ts", "10 minutes")
+        df_observation.withWatermark("reading_ts", "10 minutes")
         .groupBy(
             F.window("reading_ts", "5 minutes").alias("window"),
             F.col("device_id"),
@@ -195,6 +193,7 @@ def start_fleet(spark: SparkSession, fleet: str):
     )
     return [bronze_query, agg_query]
 
+
 # COMMAND ----------
 
 # Grant the service principal the permissions it needs on the target table.
@@ -207,10 +206,10 @@ spark.sql(f"GRANT MODIFY, SELECT ON TABLE {METRICS_TABLE} TO `{CLIENT_ID}`").col
 spark = SparkSession.builder.getOrCreate()
 
 # Register the reusable listener ONCE; it captures every query below. All values
-# come from example_config.yaml; the secret comes from the secret scope.
+# come from job parameters; the secret comes from the secret scope.
 config = ZerobusConfig(
-    server_endpoint=ZB["server_endpoint"],
-    workspace_url=ZB["workspace_url"],
+    server_endpoint=SERVER_ENDPOINT,
+    workspace_url=WORKSPACE_URL,
     table_name=METRICS_TABLE,
     client_id=CLIENT_ID,
     client_secret=CLIENT_SECRET,
@@ -222,23 +221,22 @@ print(f"Registered ZerobusStreamingQueryListener -> {METRICS_TABLE}")
 
 streams = []
 for fleet in FLEETS:
-    streams.append(start_fleet(spark, fleet))
-
-streams
+    streams.extend(start_fleet(spark, fleet))
 
 # COMMAND ----------
 
-# Wait for every query (availableNow), not awaitAnyTermination() which returns
-# after just the first one ends.
-queries = [q for fleet_queries in streams for q in fleet_queries]
-for q in queries:
+# Every query uses trigger(availableNow=True), so wait for each to finish
+# (not awaitAnyTermination, which returns after just the first one).
+for q in streams:
     q.awaitTermination()
 
-# Listener callbacks are async: let all events drain before closing, or the
-# final progress events are lost.
-listener.wait_until_drained(expected_queries=len(queries))
-listener.close()
+# Listener callbacks are asynchronous: wait until every query's events have
+# actually been delivered before closing, or the final progress events are lost.
+listener.wait_until_drained(expected_queries=len(streams))
 
+# Flush and close the sink so all queued records are durably committed. This is
+# best-effort and never raises: a metrics-sink problem must not fail the job.
+listener.close()
 
 # COMMAND ----------
 

@@ -10,31 +10,25 @@
 # MAGIC place.
 
 # COMMAND ----------
-# MAGIC %pip install pyyaml
-
-# COMMAND ----------
-
-import os
-import sys
-
-import yaml
-
-sys.path.insert(0, os.path.join(os.getcwd(), "..", "src"))
 
 from pyspark.sql import SparkSession
 
+# streaming_listener is installed on the cluster as a wheel library by the
+# bundle, so it imports directly (no sys.path hacking).
 from streaming_listener.schema import create_table_ddl
 
 # COMMAND ----------
 
-# Load shared config from the single YAML file.
-with open(os.path.join(os.getcwd(), "example_config.yaml")) as f:
-    CFG = yaml.safe_load(f)
+# Config arrives as job parameters (widgets). The defaults let the notebook run
+# interactively outside the bundle too.
+dbutils.widgets.text("catalog", "classic_stable_qkee68_catalog")  # noqa: F821
+dbutils.widgets.text("schema", "streaming_monitor")  # noqa: F821
+dbutils.widgets.text("volume", "raw_landing")  # noqa: F821
 
-CATALOG = CFG["catalog"]
-SCHEMA = CFG["schema"]
-VOLUME = CFG["volume"]
-METRICS_TABLE = CFG["metrics_table"]
+CATALOG = dbutils.widgets.get("catalog")  # noqa: F821
+SCHEMA = dbutils.widgets.get("schema")  # noqa: F821
+VOLUME = dbutils.widgets.get("volume")  # noqa: F821
+METRICS_TABLE = f"{CATALOG}.{SCHEMA}.query_metrics"
 
 # COMMAND ----------
 
@@ -46,4 +40,3 @@ spark.sql(f"CREATE VOLUME IF NOT EXISTS {CATALOG}.{SCHEMA}.{VOLUME}")
 spark.sql(create_table_ddl(METRICS_TABLE))
 
 print(f"Ensured schema {CATALOG}.{SCHEMA}, volume {VOLUME}, table {METRICS_TABLE}")
-

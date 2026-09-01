@@ -1,0 +1,77 @@
+resources:
+  jobs:
+    streaming_query_monitor:
+      name: "Streaming Query Monitor (Zerobus)"
+
+      # Job parameters are surfaced to each notebook task as widgets, so the
+      # notebooks read config via dbutils.widgets.get(...) instead of a
+      # cwd-relative YAML file. Values flow from bundle variables.
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+        - name: volume
+          default: ${var.volume}
+        - name: fleets
+          default: ${var.fleets}
+        - name: num_batches
+          default: ${var.num_batches}
+        - name: zerobus_server_endpoint
+          default: ${var.zerobus_server_endpoint}
+        - name: zerobus_workspace_url
+          default: ${var.zerobus_workspace_url}
+        - name: zerobus_client_id
+          default: ${var.zerobus_client_id}
+        - name: zerobus_secret_scope
+          default: ${var.zerobus_secret_scope}
+        - name: zerobus_client_secret_key
+          default: ${var.zerobus_client_secret_key}
+
+      # Zerobus SDK cannot pip-install on serverless, so use classic compute.
+      # Single node is plenty for the demo's two small streams.
+      job_clusters:
+        - job_cluster_key: zerobus_single_node
+          new_cluster:
+            spark_version: 17.3.x-scala2.13
+            node_type_id: ${var.node_type_id}
+            num_workers: 0
+            data_security_mode: SINGLE_USER
+            spark_conf:
+              spark.databricks.cluster.profile: singleNode
+              spark.master: "local[*, 4]"
+            custom_tags:
+              ResourceClass: SingleNode
+
+      tasks:
+        # 1. Create the schema, landing volume, and metrics table.
+        - task_key: setup
+          job_cluster_key: zerobus_single_node
+          notebook_task:
+            notebook_path: ../notebooks/setup_resources.py
+          libraries:
+            - whl: ../dist/*.whl
+
+        # 2. Land num_batches of fake telemetry parquet into the volume.
+        - task_key: generate
+          depends_on:
+            - task_key: setup
+          job_cluster_key: zerobus_single_node
+          notebook_task:
+            notebook_path: ../notebooks/generate_data.py
+          libraries:
+            - pypi:
+                package: dbldatagen
+
+        # 3. Register the listener and drain the landed data; the listener ships
+        #    query metrics to the metrics table via Zerobus.
+        - task_key: pipeline
+          depends_on:
+            - task_key: generate
+          job_cluster_key: zerobus_single_node
+          notebook_task:
+            notebook_path: ../notebooks/pipeline.py
+          libraries:
+            - whl: ../dist/*.whl
+            - pypi:
+                package: databricks-zerobus-ingest-sdk

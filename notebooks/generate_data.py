@@ -14,27 +14,29 @@
 
 
 # COMMAND ----------
-# MAGIC %pip install dbldatagen pyyaml
-
-# COMMAND ----------
 
 from __future__ import annotations
 
-import os
 import time
 
 import dbldatagen as dg
-import yaml
 from pyspark.sql import SparkSession
 
 # COMMAND ----------
 
-# Load shared config from the single YAML file.
-with open(os.path.join(os.getcwd(), "example_config.yaml")) as f:
-    CFG = yaml.safe_load(f)
+# Config arrives as job parameters (widgets); defaults allow interactive runs.
+dbutils.widgets.text("catalog", "classic_stable_qkee68_catalog")  # noqa: F821
+dbutils.widgets.text("schema", "streaming_monitor")  # noqa: F821
+dbutils.widgets.text("volume", "raw_landing")  # noqa: F821
+dbutils.widgets.text("fleets", "fleet_a,fleet_b")  # noqa: F821
+dbutils.widgets.text("num_batches", "3")  # noqa: F821
 
-FLEETS = CFG["fleets"]
-VOLUME_PATH = CFG["volume_path"]
+CATALOG = dbutils.widgets.get("catalog")  # noqa: F821
+SCHEMA = dbutils.widgets.get("schema")  # noqa: F821
+VOLUME = dbutils.widgets.get("volume")  # noqa: F821
+FLEETS = [f.strip() for f in dbutils.widgets.get("fleets").split(",") if f.strip()]  # noqa: F821
+NUM_BATCHES = int(dbutils.widgets.get("num_batches"))  # noqa: F821
+VOLUME_PATH = f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}"
 
 
 def landing_path(fleet: str) -> str:
@@ -87,9 +89,13 @@ def generate_batch(spark: SparkSession) -> None:
         (df.repartition(50).write.mode("append").parquet(landing_path(fleet)))
         print(f"Wrote {ROWS_PER_BATCH} rows for {fleet} -> {landing_path(fleet)}")
 
+
 # COMMAND ----------
 
-# Always on loop to simulate data always arriving
-while True: 
-    generate_batch(spark)
-    time.sleep(60)
+# Bounded run: land NUM_BATCHES batches so this task finishes and the pipeline
+# has data to drain. Raise num_batches (or restore a while-True loop) to
+# simulate continuously arriving telemetry.
+for _batch in range(NUM_BATCHES):  # noqa: F821
+    generate_batch(spark)  # noqa: F821
+    if _batch < NUM_BATCHES - 1:
+        time.sleep(5)

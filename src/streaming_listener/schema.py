@@ -36,7 +36,4 @@ COLUMNS: list[tuple[str, str, str]] = [
 def create_table_ddl(table_name: str) -> str:
     """Return ``CREATE TABLE IF NOT EXISTS`` DDL for the metrics table."""
     cols = ",\n    ".join(f"{name} {sql_type}" for name, sql_type, _ in COLUMNS)
-    return (
-        f"CREATE TABLE IF NOT EXISTS {table_name} (\n    {cols}\n)\n"
-        "USING DELTA\n"
-    )
+    return f"CREATE TABLE IF NOT EXISTS {table_name} (\n    {cols}\n)\nUSING DELTA\n"
