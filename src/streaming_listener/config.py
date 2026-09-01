@@ -10,6 +10,13 @@ import os
 from dataclasses import dataclass
 
 
+def _require_env(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise ValueError(f"Required environment variable {name!r} is not set")
+    return value
+
+
 @dataclass(frozen=True)
 class ZerobusConfig:
     """Everything the listener needs to open a Zerobus ingest stream.
@@ -49,10 +56,3 @@ class ZerobusConfig:
             client_id=_require_env("ZEROBUS_CLIENT_ID"),
             client_secret=_require_env("ZEROBUS_CLIENT_SECRET"),
         )
-
-
-    def _require_env(name: str) -> str:
-        value = os.environ.get(name)
-        if not value:
-            raise ValueError(f"Required environment variable {name!r} is not set")
-        return value
