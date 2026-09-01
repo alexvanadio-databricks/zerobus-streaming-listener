@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import threading
 from dataclasses import dataclass
 from typing import Any
@@ -49,6 +50,18 @@ def _json_or_none(obj: Any) -> str | None:
     if data is None or data == {} or data == []:
         return None
     return json.dumps(data)
+
+
+def _finite_or_none(x: float | None) -> float | None:
+    """Coerce non-finite floats to None for JSON safety.
+
+    Spark reports rps as Infinity/NaN for zero-duration batches. json.dumps then
+    emits literal Infinity/NaN -- invalid JSON that Zerobus rejects (error 4044),
+    dropping the whole progress record.
+    """
+    if isinstance(x, float) and not math.isfinite(x):
+        return None
+    return x
 
 
 @dataclass
@@ -118,8 +131,8 @@ class ZerobusStreamingQueryListener(StreamingQueryListener):
                 "batch_id": p.batchId,
                 "batch_duration_ms": p.batchDuration,
                 "num_input_rows": p.numInputRows,
-                "input_rows_per_second": p.inputRowsPerSecond,
-                "processed_rows_per_second": p.processedRowsPerSecond,
+                "input_rows_per_second": _finite_or_none(p.inputRowsPerSecond),
+                "processed_rows_per_second": _finite_or_none(p.processedRowsPerSecond),
                 # variant columns (JSON strings):
                 "duration_ms": _json_or_none(p.durationMs),
                 "event_time": _json_or_none(getattr(p, "eventTime", None)),
