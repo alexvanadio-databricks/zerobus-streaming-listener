@@ -35,6 +35,10 @@ def _to_jsonable(obj: Any) -> Any:
     """Best-effort convert an SDK event object into JSON-serializable data."""
     if obj is None or isinstance(obj, (str, int, float, bool)):
         return obj
+    # pyspark Row is a tuple subclass; convert via asDict BEFORE the tuple branch
+    # or df.observe() aliases collapse into a positional array and names are lost.
+    if hasattr(obj, "asDict"):
+        return {str(k): _to_jsonable(v) for k, v in obj.asDict().items()}
     if isinstance(obj, dict):
         return {str(k): _to_jsonable(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
